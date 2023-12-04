@@ -1,0 +1,282 @@
+##Syntax yang digunakan dalam penelitian
+#Long Short-Term Memory (LSTM), Gated Recurrent Unit (GRU) and Bidirectional LSTM (BiLSTM)
+import scipy
+import numpy
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import Sequential, layers, callbacks
+from tensorflow.keras.layers import Dense, LSTM, Dropout, GRU, Bidirectional
+import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+from matplotlib import pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.dates import MonthLocator, DateFormatter
+from IPython.core.pylabtools import figsize
+from pandas.plotting import register_matplotlib_converters
+register_matplotlib_converters()
+import seaborn as sns
+
+# Load data from Excel file
+file_path = '/content/datafix.xlsx'
+df = pd.read_excel(file_path)
+# Explore the first five rows
+print(df.head())
+# Data description
+print(df.describe())
+print(df.dtypes)
+
+# Plot the three variables in one graph
+plt.figure(figsize=(12, 6))
+plt.plot(df['batubara'], label='Batubara')
+plt.plot(df['gas'], label='Gas')
+plt.plot(df['minyak'], label='Minyak')
+# Add labels and legend
+plt.xlabel('Bulan')
+plt.ylabel('Harga')
+plt.title('Plot of Batubara, Gas, and Minyak')
+plt.legend()
+# Show the plot
+plt.show()
+
+# Split the dataset into train and test data
+train_size = int(len(df) * 0.6)
+train_dataset, test_dataset = df.iloc[:train_size], df.iloc[train_size:]
+
+# Split train data to X and y
+X_train_numeric = train_dataset.drop(['time'], axis=1)
+y_train = train_dataset.loc[:, ['batubara']]
+# Split test data to X and y
+X_test_numeric = test_dataset.drop(['time'], axis=1)
+y_test = test_dataset.loc[:, ['batubara']]
+
+#Data transformation
+# Different scaler for input and output
+scaler_x = MinMaxScaler(feature_range=(0, 1))
+scaler_y = MinMaxScaler(feature_range=(0, 1))
+# Fit the scaler using available training data
+input_scaler = scaler_x.fit(X_train_numeric)  # X_train_numeric should contain only numeric features
+output_scaler = scaler_y.fit(y_train)
+# Apply the scaler to training data
+train_y_norm = output_scaler.transform(y_train)
+train_x_norm = input_scaler.transform(X_train_numeric)
+# Apply the scaler to test data
+test_y_norm = output_scaler.transform(y_test)
+test_x_norm = input_scaler.transform(X_test_numeric)  # X_test_numeric should contain only numeric features
+
+# Normalize the data
+scaler = MinMaxScaler()
+dfforgr = df.drop(['time'], axis=1)
+df_normalized = pd.DataFrame(scaler.fit_transform(dfforgr), columns=dfforgr.columns)
+# Plot the normalized data
+plt.figure(figsize=(12, 6))
+plt.plot(df_normalized['batubara'], label='Batubara')
+plt.plot(df_normalized['gas'], label='Gas')
+plt.plot(df_normalized['minyak'], label='Minyak')
+# Add labels and legend
+plt.xlabel('Bulan')
+plt.ylabel('Harga yang sudah dinormalisasi')
+plt.legend()
+# Show the plot
+plt.show()
+
+#Create a 3D Input Dataset
+def create_dataset (X, y, time_steps = 1):
+    Xs, ys = [], []
+    for i in range(len(X)-time_steps):
+        v = X[i:i+time_steps, :]
+        Xs.append(v)
+        ys.append(y[i+time_steps])
+    return np.array(Xs), np.array(ys)
+
+
+TIME_STEPS = 40
+X_test, y_test = create_dataset(test_x_norm, test_y_norm, TIME_STEPS)
+X_train, y_train = create_dataset(train_x_norm, train_y_norm, TIME_STEPS)
+print('X_train.shape: ', X_train.shape)
+print('y_train.shape: ', y_train.shape)
+print('X_test.shape: ', X_test.shape)
+print('y_test.shape: ', y_test.shape)
+
+#Create BiLSTM, LSTM and GRU model
+# Create BiLSTM model
+def create_model_bilstm(units):
+    model = Sequential()
+    # First layer of BiLSTM
+    model.add(Bidirectional(LSTM(units = units, return_sequences=True),
+                            input_shape=(X_train.shape[1], X_train.shape[2])))
+    # Second layer of BiLSTM
+    model.add(Bidirectional(LSTM(units = units)))
+    model.add(Dense(1))
+    #Compile model
+    model.compile(loss='mse', optimizer='adam')
+    return model
+
+# Create LSTM or GRU model
+def create_model(units, m):
+    model = Sequential()
+    # First layer of LSTM
+    model.add(m (units = units, return_sequences = True,
+                 input_shape = [X_train.shape[1], X_train.shape[2]]))
+    model.add(Dropout(0.2))
+    # Second layer of LSTM
+    model.add(m (units = units))
+    model.add(Dropout(0.2))
+    model.add(Dense(units = 1))
+    #Compile model
+    model.compile(loss='mse', optimizer='adam')
+    return model
+
+# BiLSTM
+model_bilstm = create_model_bilstm(64)
+
+# GRU and LSTM
+model_gru = create_model(64, GRU)
+model_lstm = create_model(64, LSTM)
+
+
+#Fit the models
+# Fit BiLSTM, LSTM and GRU
+def fit_model(model):
+    early_stop = keras.callbacks.EarlyStopping(monitor = 'val_loss',
+                                               patience = 15)
+    # shuffle = False because the order of the data matters
+    history = model.fit(X_train, y_train, epochs = 50, validation_split = 0.2,
+                    batch_size = 32, shuffle = False, callbacks = [early_stop])
+    return history
+history_bilstm = fit_model(model_bilstm)
+history_lstm = fit_model(model_lstm)
+history_gru = fit_model(model_gru)
+
+#Plot train loss vs validation loss
+def plot_loss (history, model_name):
+    plt.figure(figsize = (10, 6))
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('Model Train vs Validation Loss for ' + model_name)
+    plt.ylabel('Loss')
+    plt.xlabel('epoch')
+    plt.legend(['Train loss', 'Validation loss'], loc='upper right')
+plot_loss (history_bilstm, 'BiLSTM')
+plot_loss (history_lstm, 'LSTM')
+plot_loss (history_gru, 'GRU')
+
+def plot_loss(history, model_name):
+    plt.plot(history.history['loss'], label=f'Train loss ({model_name})')
+    plt.plot(history.history['val_loss'], label=f'Validation loss ({model_name})')
+
+# Membuat gambar baru untuk plot
+plt.figure(figsize=(12, 8))
+
+# Plot loss untuk tiga model
+plot_loss(history_bilstm, 'BiLSTM')
+plot_loss(history_lstm, 'LSTM')
+plot_loss(history_gru, 'GRU')
+
+# Menambahkan judul, label, dan legenda
+plt.title('Train vs Validation Loss for BiLSTM, LSTM, and GRU')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+
+# Menampilkan grafik
+plt.show()
+
+#Inverse target variable for train and test data
+# Note that I have to use scaler_y
+y_test = scaler_y.inverse_transform(y_test)
+y_train = scaler_y.inverse_transform(y_train)
+
+#Make prediction using BiLSTM, LSTM and GRU
+def prediction(model):
+    prediction = model.predict(X_test)
+    prediction = scaler_y.inverse_transform(prediction)
+    return prediction
+prediction_bilstm = prediction(model_bilstm)
+print
+prediction_lstm = prediction(model_lstm)
+prediction_gru = prediction(model_gru)
+
+
+#Plot true future vs prediction
+def plot_future(prediction, model_name, y_test):
+    plt.figure(figsize=(10, 6))
+
+    range_future = len(prediction)
+
+    plt.plot(np.arange(range_future), np.array(y_test), label='Data Aktual')
+    plt.plot(np.arange(range_future), np.array(prediction),label='Prediksi')
+
+    plt.title('True future vs prediction for ' + model_name)
+    plt.legend(loc='upper left')
+    plt.xlabel('Bulan')
+    plt.ylabel('Harga Batubara (USD/ton)')
+
+
+plot_future(prediction_bilstm, 'BiLSTM', y_test)
+plot_future(prediction_lstm, 'LSTM', y_test)
+plot_future(prediction_gru, 'GRU', y_test)
+
+
+#Calculate RMSE, MAE, dan MAPE
+
+# Define a function to calculate MAE and RMSE
+def evaluate_prediction(predictions, actual, model_name):
+    errors = predictions - actual
+    mse = np.square(errors).mean()
+    rmse = np.sqrt(mse)
+    mae = np.abs(errors).mean()
+    mape = np.mean(np.abs(errors / actual)) * 100  # Calculate MAPE
+
+    print(model_name + ':')
+    print('Mean Absolute Error: {:.2f}'.format(mae))
+    print('Root Mean Square Error: {:.2f}'.format(rmse))
+    print('Mean Absolute Percentage Error: {:.2f}%'.format(mape))
+    print('')
+
+# Usage
+evaluate_prediction(prediction_bilstm, y_test, 'Bidirectional LSTM')
+evaluate_prediction(prediction_lstm, y_test, 'LSTM')
+evaluate_prediction(prediction_gru, y_test, 'GRU')
+
+
+import matplotlib.pyplot as plt
+from matplotlib.dates import DateFormatter
+import pandas as pd
+
+# Set the correct date format
+df['time'] = pd.to_datetime(df['time'], format='%Y-%m-%d')
+df.set_index('time', inplace=True)
+
+# Split the dataset into train and test data
+train_size = int(len(df) * 0.6)
+train_dataset, test_dataset = df.iloc[:train_size], df.iloc[train_size:]
+
+# Plot the three variables in one graph
+plt.figure(figsize=(12, 6))
+plt.plot(df.index, df['batubara'], label='Batubara', color='blue')
+plt.plot(df.index, df['gas'], label='Gas', color='green')
+plt.plot(df.index, df['minyak'], label='Minyak', color='red')
+
+# Highlight the area corresponding to the test data
+plt.axvline(test_dataset.index[0], color='black', linestyle='--', label='Data Splitting')
+
+# Add labels and legend
+plt.xlabel('Bulan dan Tahun')
+plt.ylabel('Harga')
+plt.legend()
+
+# Configure the date format on the x-axis
+plt.gca().xaxis.set_major_formatter(DateFormatter('%b %Y'))
+
+# Add text labels for train and test data
+plt.text(train_dataset.index[-100], df[['batubara', 'gas', 'minyak']].max().max(), 'Data Training', verticalalignment='bottom', horizontalalignment='left', color='black')
+plt.text(test_dataset.index[100], df[['batubara', 'gas', 'minyak']].max().max(), 'Data Testing', verticalalignment='bottom', horizontalalignment='right', color='black')
+
+# Show the plot
+plt.gcf().autofmt_xdate()  # To improve the layout of overlapping dates
+plt.show()
+
+print('Dimension of train data: ', train_dataset.shape)
+print('Dimension of test data: ', test_dataset.shape)
