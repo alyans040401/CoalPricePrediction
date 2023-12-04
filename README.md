@@ -1,1 +1,1 @@
-# LSTM-GRU-Bi-LSTM_CoalPricePredictionComparation
+# Application_of_LSTM_GRU_Bi-LSTM_in_WorldCoalPrice
